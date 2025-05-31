@@ -1,4 +1,3 @@
-```markdown
 # 🧱 zer0.de's Docker Media Stack
 
 Ein vollständiges, selbstgehostetes Medien-Ökosystem – automatisiert und über VPN geschützt.
