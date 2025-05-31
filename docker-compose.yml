@@ -1,0 +1,176 @@
+#
+# ┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+# ┃                    ⚡ Ultimate Media Stack ⚡                  ┃
+# ┃          Automated Downloads · VPN Protection · Plex Ready   ┃
+# ┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
+#
+# ▶ Components:
+#   - Gluetun: VPN proxy container for routing traffic
+#   - qBittorrent: Torrent client (WebUI on port 8080)
+#   - SABnzbd: Usenet client (WebUI on port 8085)
+#   - Radarr: Automated movie downloader (port 7878)
+#   - Sonarr: Automated series downloader (port 8989)
+#   - Prowlarr: Indexer manager (port 9696)
+#   - Watchtower: Auto-updates containers silently
+#   - Heimdall: Homepage/dashboard (port 80)
+#   - Portainer: Container management UI (port 9000)
+#
+# ▶ Quickstart:
+#   mkdir -p ./config/Downloads/{complete,incomplete,Movies,Serien}
+#   docker compose up -d
+#
+# ▶ Web Interfaces:
+#   - qBittorrent → http://localhost:8080 (admin / adminadmin)
+#   - SABnzbd     → http://localhost:8085
+#   - Radarr      → http://localhost:7878
+#   - Sonarr      → http://localhost:8989
+#   - Prowlarr    → http://localhost:9696
+#   - Heimdall    → http://localhost
+#   - Portainer   → http://localhost:9000
+#
+# ▶ Maintained by zer0.de — Enjoy!
+
+version: '3.8'
+
+services:
+
+  gluetun:
+    image: qmcgaw/gluetun
+    container_name: gluetun
+    cap_add:
+      - NET_ADMIN
+    environment:
+      - VPN_SERVICE_PROVIDER=custom        # Use "custom" for .ovpn file
+      - VPN_TYPE=openvpn
+      - OPENVPN_USER=YOURUSERNAME          # Replace with VPN username
+      - OPENVPN_PASSWORD=YOURPASSWORD      # Replace with VPN password
+      - OPENVPN_CUSTOM_CONFIG=/gluetun/custom.conf  # Mount renamed .ovpn as custom.conf
+      - FIREWALL=on
+      - DOT=off
+      - LOCAL_NETWORK=192.168.0.0/16       # Allow access to your local network
+      - TZ=Europe/Berlin
+      - LOG_LEVEL=info
+    devices:
+      - /dev/net/tun:/dev/net/tun          # Needed for VPN tunnel
+    volumes:
+      - ./config/gluetun:/gluetun          # Place your custom.conf here
+      - /etc/localtime:/etc/localtime:ro
+    dns:
+      - 1.1.1.1                            # You can change to 8.8.8.8 or local DNS
+    ports:
+      - 8080:8080                          # Expose qBittorrent WebUI
+      - 8085:8085                          # Expose SABnzbd WebUI
+    restart: unless-stopped
+
+  qbittorrent:
+    image: lscr.io/linuxserver/qbittorrent
+    container_name: qbittorrent
+    network_mode: "service:gluetun"        # Route through VPN
+    depends_on:
+      - gluetun
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=Europe/Berlin
+      - WEBUI_PORT=8080
+    volumes:
+      - ./config/qbittorrent:/config
+      - ./downloads:/downloads
+      - ./qbittorrent/incomplete:/incomplete
+      - ./qbittorrent/torrents:/torrents
+    restart: unless-stopped
+
+  sabnzbd:
+    image: linuxserver/sabnzbd
+    container_name: sabnzbd
+    network_mode: "service:gluetun"        # Route through VPN
+    depends_on:
+      - gluetun
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=Europe/Berlin
+    volumes:
+      - ./config/sabnzbd:/config
+      - /downloads:/downloads
+    restart: unless-stopped
+
+  radarr:
+    image: linuxserver/radarr:latest
+    container_name: radarr
+    network_mode: "host"                   # Direct access to LAN and Plex
+    depends_on:
+      - gluetun
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=Etc/UTC
+    volumes:
+      - ./config/radarr:/config
+      - ./downloads:/downloads
+      - ./radarr/movies:/movies
+    restart: unless-stopped
+
+  sonarr:
+    image: linuxserver/sonarr
+    container_name: sonarr
+    network_mode: "host"                   # Direct access to LAN and Plex
+    depends_on:
+      - gluetun
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=Europe/Berlin
+    volumes:
+      - ./config/sonarr:/config
+      - ./downloads:/downloads
+      - ./sonarr/tv:/tv
+    restart: unless-stopped
+
+  prowlarr:
+    image: linuxserver/prowlarr
+    container_name: prowlarr
+    network_mode: "host"                   # Needs LAN access to indexers
+    depends_on:
+      - gluetun
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=Europe/Berlin
+    volumes:
+      - ./config/prowlarr:/config
+    restart: unless-stopped
+
+  watchtower:
+    image: containrrr/watchtower
+    container_name: watchtower
+    restart: unless-stopped
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      - TZ=Europe/Berlin
+      - WATCHTOWER_CLEANUP=true
+      - WATCHTOWER_POLL_INTERVAL=21600    # Check for updates every 6h
+      # - WATCHTOWER_NOTIFICATIONS=shoutrrr # Optional: Discord/Telegram alerts
+    ports:
+      - 8000:8000                          # Only if Watchtower UI is added later
+
+  portainer:
+    image: portainer/portainer-ce
+    container_name: portainer
+    ports:
+      - 9000:9000
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./config/portainer:/data
+    restart: unless-stopped
+
+  heimdall:
+    image: linuxserver/heimdall
+    container_name: heimdall
+    ports:
+      - 80:80
+      - 443:443
+    volumes:
+      - ./config/heimdall:/config
+    restart: unless-stopped
